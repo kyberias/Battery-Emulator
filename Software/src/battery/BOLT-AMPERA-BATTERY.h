@@ -2,8 +2,10 @@
 #define BOLT_AMPERA_BATTERY_H
 #include <Arduino.h>
 #include "../include.h"
+#include "CanBattery.h"
 
 #define BATTERY_SELECTED
+#define SELECTED_BATTERY_CLASS BoltAmperaBattery
 
 #define MAX_PACK_VOLTAGE_DV 4150  //5000 = 500.0V
 #define MIN_PACK_VOLTAGE_DV 2500
@@ -176,7 +178,175 @@
 #define POLL_7E7_CELL_119 0x4257
 #define POLL_7E7_CELL_120 0x4258
 
-void setup_battery(void);
-void transmit_can_frame(CAN_frame* tx_frame, int interface);
+class BoltAmperaBattery : public CanBattery {
+ public:
+  virtual void setup(void);
+  virtual void handle_incoming_can_frame(CAN_frame rx_frame);
+  virtual void update_values();
+  virtual void transmit_can();
+
+ private:
+  unsigned long previousMillis20ms = 0;   // will store last time a 20ms CAN Message was send
+  unsigned long previousMillis100ms = 0;  // will store last time a 100ms CAN Message was send
+  unsigned long previousMillis120ms = 0;  // will store last time a 120ms CAN Message was send
+
+  CAN_frame BOLT_778 = {.FD = false,  // Unsure of what this message is, added only as example
+                        .ext_ID = false,
+                        .DLC = 7,
+                        .ID = 0x778,
+                        .data = {0x00, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  CAN_frame BOLT_POLL_7E4 = {.FD = false,  // VICM_HV poll
+                             .ext_ID = false,
+                             .DLC = 8,
+                             .ID = 0x7E4,
+                             .data = {0x03, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  CAN_frame BOLT_ACK_7E4 = {.FD = false,  //VICM_HV ack
+                            .ext_ID = false,
+                            .DLC = 8,
+                            .ID = 0x7E4,
+                            .data = {0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  CAN_frame BOLT_POLL_7E7 = {.FD = false,  //VITM_HV poll
+                             .ext_ID = false,
+                             .DLC = 8,
+                             .ID = 0x7E7,
+                             .data = {0x03, 0x22, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+  CAN_frame BOLT_ACK_7E7 = {.FD = false,  //VITM_HV ack
+                            .ext_ID = false,
+                            .DLC = 8,
+                            .ID = 0x7E7,
+                            .data = {0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
+
+  // Other PID requests in the vehicle
+  // All HV ECUs - 0x101
+  // HPCC HV - 0x243 replies on 0x643
+  // OBCM HV - 0x244 replies on 0x644
+  // VICM_HV - 0x7E4 replies 0x7EC (This is battery)
+  // VICM2_HV - 0x7E6 replies 0x7EF (Tis is battery also)
+  // VITM_HV - 0x7E7 replies on 7EF (This is battery)
+
+  uint16_t battery_cell_voltages[96];  //array with all the cellvoltages
+  uint16_t battery_capacity_my17_18 = 0;
+  uint16_t battery_capacity_my19plus = 0;
+  uint16_t battery_SOC_display = 0;
+  uint16_t battery_SOC_raw_highprec = 0;
+  uint16_t battery_max_temperature = 0;
+  uint16_t battery_min_temperature = 0;
+  uint16_t battery_min_cell_voltage = 0;
+  uint16_t battery_max_cell_voltage = 0;
+  uint16_t battery_internal_resistance = 0;
+  uint16_t battery_lowest_cell = 0;
+  uint16_t battery_highest_cell = 0;
+  uint16_t battery_voltage_polled = 0;
+  uint16_t battery_voltage_periodic = 0;
+  uint16_t battery_vehicle_isolation = 0;
+  uint16_t battery_isolation_kohm = 0;
+  uint16_t battery_HV_locked = 0;
+  uint16_t battery_crash_event = 0;
+  uint16_t battery_HVIL = 0;
+  uint16_t battery_HVIL_status = 0;
+  uint16_t battery_5V_ref = 0;
+  int16_t battery_current_7E4 = 0;
+  int16_t battery_module_temp_1 = 0;
+  int16_t battery_module_temp_2 = 0;
+  int16_t battery_module_temp_3 = 0;
+  int16_t battery_module_temp_4 = 0;
+  int16_t battery_module_temp_5 = 0;
+  int16_t battery_module_temp_6 = 0;
+  uint16_t battery_cell_average_voltage = 0;
+  uint16_t battery_cell_average_voltage_2 = 0;
+  uint16_t battery_terminal_voltage = 0;
+  uint16_t battery_ignition_power_mode = 0;
+  int16_t battery_current_7E7 = 0;
+  int16_t temperature_1 = 0;
+  int16_t temperature_2 = 0;
+  int16_t temperature_3 = 0;
+  int16_t temperature_4 = 0;
+  int16_t temperature_5 = 0;
+  int16_t temperature_6 = 0;
+  int16_t temperature_highest = 0;
+  int16_t temperature_lowest = 0;
+  uint8_t mux = 0;
+  uint8_t poll_index_7E4 = 0;
+  uint16_t currentpoll_7E4 = POLL_7E4_CAPACITY_EST_GEN1;
+  uint16_t reply_poll_7E4 = 0;
+  uint8_t poll_index_7E7 = 0;
+  uint16_t currentpoll_7E7 = POLL_7E7_CURRENT;
+  uint16_t reply_poll_7E7 = 0;
+
+  const uint16_t poll_commands_7E4[19] = {POLL_7E4_CAPACITY_EST_GEN1,
+                                          POLL_7E4_CAPACITY_EST_GEN2,
+                                          POLL_7E4_SOC_DISPLAY,
+                                          POLL_7E4_SOC_RAW_HIGHPREC,
+                                          POLL_7E4_MAX_TEMPERATURE,
+                                          POLL_7E4_MIN_TEMPERATURE,
+                                          POLL_7E4_MIN_CELL_V,
+                                          POLL_7E4_MAX_CELL_V,
+                                          POLL_7E4_INTERNAL_RES,
+                                          POLL_7E4_LOWEST_CELL_NUMBER,
+                                          POLL_7E4_HIGHEST_CELL_NUMBER,
+                                          POLL_7E4_VOLTAGE,
+                                          POLL_7E4_VEHICLE_ISOLATION,
+                                          POLL_7E4_ISOLATION_TEST_KOHM,
+                                          POLL_7E4_HV_LOCKED_OUT,
+                                          POLL_7E4_CRASH_EVENT,
+                                          POLL_7E4_HVIL,
+                                          POLL_7E4_HVIL_STATUS,
+                                          POLL_7E4_CURRENT};
+
+  const uint16_t poll_commands_7E7[108] = {POLL_7E7_CURRENT,          POLL_7E7_5V_REF,
+                                           POLL_7E7_MODULE_TEMP_1,    POLL_7E7_MODULE_TEMP_2,
+                                           POLL_7E7_MODULE_TEMP_3,    POLL_7E7_MODULE_TEMP_4,
+                                           POLL_7E7_MODULE_TEMP_5,    POLL_7E7_MODULE_TEMP_6,
+                                           POLL_7E7_CELL_AVG_VOLTAGE, POLL_7E7_CELL_AVG_VOLTAGE_2,
+                                           POLL_7E7_TERMINAL_VOLTAGE, POLL_7E7_IGNITION_POWER_MODE,
+                                           POLL_7E7_CELL_01,          POLL_7E7_CELL_02,
+                                           POLL_7E7_CELL_03,          POLL_7E7_CELL_04,
+                                           POLL_7E7_CELL_05,          POLL_7E7_CELL_06,
+                                           POLL_7E7_CELL_07,          POLL_7E7_CELL_08,
+                                           POLL_7E7_CELL_09,          POLL_7E7_CELL_10,
+                                           POLL_7E7_CELL_11,          POLL_7E7_CELL_12,
+                                           POLL_7E7_CELL_13,          POLL_7E7_CELL_14,
+                                           POLL_7E7_CELL_15,          POLL_7E7_CELL_16,
+                                           POLL_7E7_CELL_17,          POLL_7E7_CELL_18,
+                                           POLL_7E7_CELL_19,          POLL_7E7_CELL_20,
+                                           POLL_7E7_CELL_21,          POLL_7E7_CELL_22,
+                                           POLL_7E7_CELL_23,          POLL_7E7_CELL_24,
+                                           POLL_7E7_CELL_25,          POLL_7E7_CELL_26,
+                                           POLL_7E7_CELL_27,          POLL_7E7_CELL_28,
+                                           POLL_7E7_CELL_29,          POLL_7E7_CELL_30,
+                                           POLL_7E7_CELL_31,          POLL_7E7_CELL_32,
+                                           POLL_7E7_CELL_33,          POLL_7E7_CELL_34,
+                                           POLL_7E7_CELL_35,          POLL_7E7_CELL_36,
+                                           POLL_7E7_CELL_37,          POLL_7E7_CELL_38,
+                                           POLL_7E7_CELL_39,          POLL_7E7_CELL_40,
+                                           POLL_7E7_CELL_41,          POLL_7E7_CELL_42,
+                                           POLL_7E7_CELL_43,          POLL_7E7_CELL_44,
+                                           POLL_7E7_CELL_45,          POLL_7E7_CELL_46,
+                                           POLL_7E7_CELL_47,          POLL_7E7_CELL_48,
+                                           POLL_7E7_CELL_49,          POLL_7E7_CELL_50,
+                                           POLL_7E7_CELL_51,          POLL_7E7_CELL_52,
+                                           POLL_7E7_CELL_53,          POLL_7E7_CELL_54,
+                                           POLL_7E7_CELL_55,          POLL_7E7_CELL_56,
+                                           POLL_7E7_CELL_57,          POLL_7E7_CELL_58,
+                                           POLL_7E7_CELL_59,          POLL_7E7_CELL_60,
+                                           POLL_7E7_CELL_61,          POLL_7E7_CELL_62,
+                                           POLL_7E7_CELL_63,          POLL_7E7_CELL_64,
+                                           POLL_7E7_CELL_65,          POLL_7E7_CELL_66,
+                                           POLL_7E7_CELL_67,          POLL_7E7_CELL_68,
+                                           POLL_7E7_CELL_69,          POLL_7E7_CELL_70,
+                                           POLL_7E7_CELL_71,          POLL_7E7_CELL_72,
+                                           POLL_7E7_CELL_73,          POLL_7E7_CELL_74,
+                                           POLL_7E7_CELL_75,          POLL_7E7_CELL_76,
+                                           POLL_7E7_CELL_77,          POLL_7E7_CELL_78,
+                                           POLL_7E7_CELL_79,          POLL_7E7_CELL_80,
+                                           POLL_7E7_CELL_81,          POLL_7E7_CELL_82,
+                                           POLL_7E7_CELL_83,          POLL_7E7_CELL_84,
+                                           POLL_7E7_CELL_85,          POLL_7E7_CELL_86,
+                                           POLL_7E7_CELL_87,          POLL_7E7_CELL_88,
+                                           POLL_7E7_CELL_89,          POLL_7E7_CELL_90,
+                                           POLL_7E7_CELL_91,          POLL_7E7_CELL_92,
+                                           POLL_7E7_CELL_93,          POLL_7E7_CELL_94,
+                                           POLL_7E7_CELL_95,          POLL_7E7_CELL_96};
+};
 
 #endif
